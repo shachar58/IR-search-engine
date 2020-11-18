@@ -4,7 +4,8 @@ from parser_module import Parse
 from indexer import Indexer
 from searcher import Searcher
 import utils
-
+import time
+import sys
 
 def run_engine():
     """
@@ -12,22 +13,54 @@ def run_engine():
     :return:
     """
     number_of_documents = 0
-
+    timer = True
     config = ConfigClass()
     r = ReadFile(corpus_path=config.get__corpusPath())
-    p = Parse()
+    p = Parse() #p = Parse(with_stemmer=True)
     indexer = Indexer(config)
 
-    documents_list = r.read_file(file_name='sample3.parquet')
+    documents_list = r.read_file(file_name='Data/Data/date=07-08-2020/covid19_07-08.snappy.parquet')
+
     # Iterate over every document in the file
+    start_time = time.perf_counter()
+    n_doc_lst = len(documents_list)
+    total_times = [0, 0, 0, 0, 0, 0, 0, 0]
     for idx, document in enumerate(documents_list):
         # parse the document
-        parsed_document = p.parse_doc(document)
+        times, parsed_document = p.parse_doc(document)
         number_of_documents += 1
         # index the document data
         indexer.add_new_doc(parsed_document)
-    print('Finished parsing and indexing. Starting to export files')
+        end_time = time.perf_counter()
 
+        # pre_parse, slashes, comma, numbers, perc/dollars/KMB, stop_words@#, entities, rest
+        for t in range(len(times)):
+            total_times[t] = total_times[t] * idx + times[t]
+            total_times[t] = round(total_times[t] / (idx + 1), 6)
+
+
+        avg_time_per_tweet = round((end_time - start_time) / (idx + 1), 3)
+        estimate_time = int(((n_doc_lst - idx) * avg_time_per_tweet) / 60)
+        # sys.stdout.write('\r' + str(idx) + '/' + str(n_doc_lst) + ', avg. per tweet:' + str(avg_time_per_tweet)
+        #                  + ' seconds, estimated end time: ' + str(estimate_time) + 'mins')
+
+        sys.stdout.write('\r' + str(idx) + '/' + str(n_doc_lst)
+                         + ', avg. per tweet:' + str(avg_time_per_tweet)
+                         + ' seconds, pre_parse:' + str(total_times[0])
+                         + ' seconds, slashes:' + str(total_times[1])
+                         + ' seconds, comma:' + str(total_times[2])
+                         + ' seconds, numbers:' + str(total_times[3])
+                         + ' seconds, perc/dollars/KMB:' + str(total_times[4])
+                         + ' seconds, stop_words@#:' + str(total_times[5])
+                         + ' seconds, entities:' + str(total_times[6])
+                         + ' seconds, rest:' + str(total_times[7])
+                         + ' seconds, estimated end time: ' + str(estimate_time) + 'mins')
+
+
+    end_time = time.perf_counter()
+    if timer:
+        print(f'Elapsed parsing time: {end_time - start_time:0.4f} seconds')
+    print('Finished parsing and indexing. Starting to export files')
     utils.save_obj(indexer.inverted_idx, "inverted_idx")
     utils.save_obj(indexer.postingDict, "posting")
 
