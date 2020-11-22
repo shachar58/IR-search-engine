@@ -11,23 +11,67 @@ nlp = spacy.load("en_core_web_sm")
 
 class Parse:
 
-    def __init__(self, with_stemmer=False, include_urls=False, include_quote=False):
+    def __init__(self, with_stemmer=False, include_urls=False, include_quote=False, debug=False, timer=False):
         self.stemmer = Stemmer()
         self.with_stemmer = with_stemmer
         self.include_urls = include_urls
         self.include_quote = include_quote
         self.stop_words = stopwords.words('english')
         self.stop_words += ["i'm", "it's", 'they', "i've", 'you', 'u', 'we', 'rt', 'im', 'use', 'sure', ]
+        self.debug = debug
+        self.timer = timer
+        self.times = []
 
     def _is_number(self, number):
         return number.replace(',', '').replace('.', '', 1).replace('%', '', 1).replace('$', '', 1).replace('K', '', 1) \
             .replace('M', '', 1).replace('B', '', 1).isdigit()
 
+    def _pre_parse(self, text):
+        text = ' '.join([w for w in text.split(' ') if '…' not in w])
+        whitespace = ' \t\n\r\v\f'
+        ascii_lowercase = 'abcdefghijklmnopqrstuvwxyz'
+        ascii_uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        digits = '0123456789'
+        # punctuation = r"""!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"""
+        punctuation = r"""!#$%&'*’+,-./<=>?@[\]^_{|}~"""
+        printable = digits + ascii_lowercase + ascii_uppercase + punctuation + whitespace
+        text = ''.join([x for x in text if x in printable])
+
+        text = text.replace('\n', ' ')  # remove new lines
+        text = re.sub(' +', ' ', text)  # Remove double spaces
+        return text
+
+    def _extract_entities(self, text):
+        terms = []
+        entities_terms = []
+        subterm = ''
+
+        for subtext in text.split(','):
+            sub_terms = subtext.split(' ')
+            for term in sub_terms:
+                if not term.replace("'", '').replace('-', '').isalnum(): #Not a word
+                    if len(subterm.split(' ')) >= 2:
+                        entities_terms.append(subterm)
+                    subterm = ''
+                elif term[0].upper() == term[0]:
+                    if subterm == '':
+                        subterm = term.replace('-', ' ')
+                    else:
+                        subterm += ' ' + term.replace('-', ' ')
+                else:
+                    if len(subterm.split(' ')) >= 2:
+                        entities_terms.append(subterm)
+                    subterm = ''
+                terms.append(term)
+
+        entities_terms = [term for term in entities_terms if term != '']
+        return entities_terms, terms
+
     def _number_transform(self, term):
         opt_term = term.replace('%', '', 1).replace('$', '', 1).replace('K', '', 1) \
             .replace('M', '', 1).replace('B', '', 1)
         replaced_term_optional = opt_term.replace(',', '')
-        if not self._is_number(replaced_term_optional):
+        if not self._is_number(term.replace(',', '')):
             return term
 
         if float(replaced_term_optional) < 1000:
@@ -37,7 +81,7 @@ class Parse:
             return term.replace(replaced_term_optional, str(number))
 
         elif float(replaced_term_optional) < 1000000:
-            if term.isdigit() and len(term) == 4:  # Maybe an year
+            if term.isdigit() and len(term) == 4 and int(term) > 1500 and int(term) < 2100:  # Maybe an year
                 return term
             else:
                 number = round(float(replaced_term_optional) / 1000, 3)
@@ -54,6 +98,8 @@ class Parse:
             if number == float(float(replaced_term_optional) // 1000000):
                 number = int(number)
             return term.replace(opt_term, str(number) + 'B')
+        else:
+            return term
 
     def _url_transform(self, url):
         parts = []
@@ -83,6 +129,18 @@ class Parse:
         parts = [p for p in parts if p != '']
         return parts
 
+    def remove_comma(self, w):
+        w = re.sub('[,]*$', '', w)
+        w = re.sub('[.]*$', '', w)
+        w = re.sub('^[,]*', '', w)
+        w = re.sub('^[.]*', '', w)
+        w = re.sub('[:]*$', '', w)
+        w = re.sub('[-]+', ' ', w)
+        w = re.sub('[’]+', "'", w)
+        w = re.sub('[?]*$', '', w)
+        w = re.sub('[!]*$', '', w)
+        return w
+
     def _splitHashtags(self, term_):
         for i in range(len(term_) - 1)[::-1]:
             if term_[i].isupper() and term_[i + 1].islower():
@@ -91,103 +149,24 @@ class Parse:
                 term_ = term_[:i] + ' ' + term_[i:]
         return term_.split()
 
-    def _pre_parse(self, text):
-        text = ' '.join([w for w in text.split(' ') if '…' not in w])
-        whitespace = ' \t\n\r\v\f'
-        ascii_lowercase = 'abcdefghijklmnopqrstuvwxyz'
-        ascii_uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-        digits = '0123456789'
-        # punctuation = r"""!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"""
-        punctuation = r"""!#$%&'*+,-./<=>?@[\]^_{|}~"""
-        printable = digits + ascii_lowercase + ascii_uppercase + punctuation + whitespace
-        text = ''.join([x for x in text if x in printable])
-
-        text = text.replace('\n', ' ')  # remove new lines
-        text = re.sub(' +', ' ', text)  # Remove double spaces
-        return text
-
-    def parse_sentence(self, text):
-        """
-        This function tokenize, remove stop words and apply lower case for every word within the text
-        :param text:
-        :return:
-        """
-
-        # print('Text:', text)
-        timer = True
-        times = []
-
-        if timer:
-            start_time = time.perf_counter()
-
-        text = self._pre_parse(text)
-        temp_text_tokens = text.split(' ')
-
-
-        if timer:
-            end_time = time.perf_counter()
-            times.append(end_time - start_time)
-
-        removed_urls_tokens = [w for w in temp_text_tokens if not w.startswith('https')]
-
-        if timer:
-            start_time = time.perf_counter()
-
-        text_tokens = []
-        for token in removed_urls_tokens:
-            if len(token.split('/')) == 1:
-                text_tokens.append(token)
-                continue
-            splited = token.split('/')
-            if len(splited) == 2 and splited[0].isdigit() and splited[1].isdigit():
-                text_tokens.append(token)
+    def _hashtags_tag_parse(self, tokens):
+        result_tokens = []
+        rest_tokens = []
+        for w in tokens:
+            if w[0] == '#':
+                for subw in w[1:].split('_'):
+                    splited_hashtag = self._splitHashtags(subw)
+                    result_tokens += [sub_hashtag.lower() for sub_hashtag in splited_hashtag]
+                result_tokens.append(w.replace('_', '').lower())
+            elif w[0] == '@':
+                result_tokens.append(w)
             else:
-                text_tokens += splited
+                rest_tokens.append(w)
+        return result_tokens, rest_tokens
 
-        if timer:
-            end_time = time.perf_counter()
-            times.append(end_time - start_time)
-        # print('After cleaning slashes', text_tokens)
-
-        if timer:
-            start_time = time.perf_counter()
-
-
-        remove_comma_terms = []
-        for w in text_tokens:
-            w = re.sub('[,]*$', '', w)
-            w = re.sub('[.]*$', '', w)
-            w = re.sub('^[,]*', '', w)
-            w = re.sub('^[.]*', '', w)
-            w = re.sub('[:]*$', '', w)
-            w = re.sub('[-]*', ' ', w)
-            w = re.sub('[?]*$', '', w)
-            w = re.sub('[!]*$', '', w)
-            if w != '':
-                remove_comma_terms.append(w)
-
-
-        if timer:
-            end_time = time.perf_counter()
-            times.append(end_time - start_time)
-        # print('After remove comma:', remove_comma_terms)
-
-        if timer:
-            start_time = time.perf_counter()
-
-
-        fix_numbers_terms = [self._number_transform(w) for w in remove_comma_terms]
-
-        if timer:
-            end_time = time.perf_counter()
-            times.append(end_time - start_time)
-
-        if timer:
-            start_time = time.perf_counter()
-
-
+    def _special_parse(self, tokens):
         parse_number_comma_tokens = []
-        for w in fix_numbers_terms:
+        for w in tokens:
             n_new_text_tokens = len(parse_number_comma_tokens) - 1
             if (w.lower() == 'percent' or w.lower() == 'percentage') and len(parse_number_comma_tokens) != 0 and \
                     self._is_number(parse_number_comma_tokens[n_new_text_tokens]):
@@ -209,68 +188,80 @@ class Parse:
                 parse_number_comma_tokens[n_new_text_tokens] = parse_number_comma_tokens[n_new_text_tokens] + ' ' + w
             else:
                 parse_number_comma_tokens.append(w)
+        return parse_number_comma_tokens
 
-        if timer:
-            end_time = time.perf_counter()
-            times.append(end_time - start_time)
-        # print('After numbers comma:', parse_number_comma_tokens)
-
-        if timer:
-            start_time = time.perf_counter()
-
-
-        text_tokens_without_stopwords = []
-        rest_tokens = []
-        for w in parse_number_comma_tokens:
-            if w.lower() in self.stop_words:
+    def _remove_slashes(self, tokens):
+        result_tokens = []
+        for token in tokens:
+            if len(token.split('/')) == 1:
+                result_tokens.append(token)
                 continue
-            if w[0] == '#':
-                for subw in w[1:].split('_'):
-                    splited_hashtag = self._splitHashtags(subw)
-                    text_tokens_without_stopwords += [sub_hashtag.lower() for sub_hashtag in splited_hashtag]
-                text_tokens_without_stopwords.append(w.replace('_', '').lower())
-            elif w[0] == '@':
-                text_tokens_without_stopwords.append(w)
+            splited = token.split('/')
+            if len(splited) == 2 and splited[0].isdigit() and splited[1].isdigit():
+                result_tokens.append(token)
             else:
-                rest_tokens.append(w)
+                result_tokens += splited
+        return result_tokens
 
-
-        if timer:
-            end_time = time.perf_counter()
-            times.append(end_time - start_time)
-
-        if timer:
+    def _apply(self, func, input):
+        end_time, start_time = 0, 0
+        if self.timer:
             start_time = time.perf_counter()
-
-        entities = nlp(' '.join(rest_tokens))
-        entities = [entity.text for entity in entities.ents if entity.label_ in ['PERSON', 'ORG', 'GPE', 'NORP', 'FAC']]
-
-        if timer:
+            result = func(input)
             end_time = time.perf_counter()
-            times.append(end_time - start_time)
+        else:
+            result = func(input)
 
-        if timer:
-            start_time = time.perf_counter()
+        if self.debug:
+            print(result)
 
-        rest_tokens = [token for token in rest_tokens if token not in entities]
-        capital_tokens = [token for token in rest_tokens if token.lower() != token]
+        self.times.append(end_time - start_time)
+        return result
+
+    def parse_sentence(self, text):
+        """
+        This function tokenize, remove stop words and apply lower case for every word within the text
+        :param text:
+        :return:
+        """
+        self.timer = True
+        self.times = []
+
+        if self.debug:
+            print('Text:', text)
+
+        text = self._apply(self._pre_parse, text)
+        entities, temp_text_tokens = self._apply(self._extract_entities, text)
+
+        removed_urls_tokens = [w for w in temp_text_tokens if not w.startswith('https')]
+
+        text_tokens = self._apply(self._remove_slashes, removed_urls_tokens)
+
+        remove_comma_terms = [self.remove_comma(term) for term in text_tokens if self.remove_comma(term) != '']
+        entities_terms = [self.remove_comma(term) for term in entities if self.remove_comma(term) != '']
+        fix_numbers_terms = [self._number_transform(w) for w in remove_comma_terms]
+
+        parse_number_comma_tokens = self._apply(self._special_parse, fix_numbers_terms)
+
+        parse_number_comma_tokens = [w for w in parse_number_comma_tokens if w.lower() not in self.stop_words]
+
+        tokens_parsed, rest_tokens = self._apply(self._hashtags_tag_parse, parse_number_comma_tokens)
+
+        capital_tokens = [token.upper() for token in rest_tokens if token.lower() != token]
         rest_tokens = [token for token in rest_tokens if token.lower() == token]
-
-        if timer:
-            end_time = time.perf_counter()
-            times.append(end_time - start_time)
 
         if self.with_stemmer:
             rest_tokens = [self.stemmer.stem_term(token) for token in rest_tokens]
-        total_tokens = rest_tokens + entities + text_tokens_without_stopwords + capital_tokens
-        # print('After:', total_tokens)
-        # print('------------------------------------------------------------------------------------------')
-        return times, total_tokens
+        total_tokens = rest_tokens + entities_terms + tokens_parsed + capital_tokens
+
+        if self.debug:
+            print('Total tokens:', total_tokens)
+        return total_tokens
 
     def _parse_urls(self, urls):
         urls = urls.replace('null', 'None')
         urls_tokens = [self._url_transform(w) for w in eval(urls).values() if
-                       w != '' and w != None and 'twitter.com' not in w]
+                       w != '' and w is not None and 'twitter.com' not in w]
         urls_tokens = [item for sublist in urls_tokens for item in sublist]
         return urls_tokens
 
@@ -289,13 +280,15 @@ class Parse:
         quote_url = doc_as_list[9]
         term_dict = {}
 
+        #print(full_text)
+
         try:
-            times, tokenized_text = self.parse_sentence(full_text)
+            tokenized_text = self.parse_sentence(full_text)
         except:
             print(full_text)
-            print(sys.exc_info()[0])
             tokenized_text = []
-            times = [0] * 7
+        # print(tokenized_text)
+        # print('---------------------------------------------------------')
 
         if self.include_urls:
             tokenized_text += self._parse_urls(url)
@@ -317,4 +310,4 @@ class Parse:
         document = Document(tweet_id, tweet_date, full_text, url, retweet_text=None, retweet_url=None,
                             quote_text=quote_text, quote_url=quote_url, term_doc_dictionary=term_dict,
                             doc_length=doc_length)
-        return times, document
+        return document
