@@ -4,7 +4,10 @@ from parser_module import Parse
 from indexer import Indexer
 from searcher import Searcher
 import utils
-
+import time
+import sys
+import os
+import multiprocessing
 
 def run_engine():
     """
@@ -12,22 +15,30 @@ def run_engine():
     :return:
     """
     number_of_documents = 0
-
+    timer = True
     config = ConfigClass()
     r = ReadFile(corpus_path=config.get__corpusPath())
-    p = Parse()
+    p = Parse() #p = Parse(with_stemmer=True)
     indexer = Indexer(config)
 
-    documents_list = r.read_file(file_name='sample3.parquet')
-    # Iterate over every document in the file
-    for idx, document in enumerate(documents_list):
-        # parse the document
-        parsed_document = p.parse_doc(document)
-        number_of_documents += 1
-        # index the document data
-        indexer.add_new_doc(parsed_document)
-    print('Finished parsing and indexing. Starting to export files')
+    data_dir = 'Data' + os.sep + 'Data'
+    npy_dirs = [root for root, dirs, files in os.walk(data_dir)]
+    for dir_path in npy_dirs:
+        files = [os.path.join(dir_path, fname) for fname in os.listdir(dir_path) if fname.endswith('.parquet')]
+        for file in files:
+            tweets = r.read_file(file_name=file)
+            start_time = time.perf_counter()
+            documents_list = multiprocessing.Pool(12).map(p.parse_doc, tweets)
+            end_time = time.perf_counter()
+            avg_time_per_tweet = (end_time - start_time) / len(tweets)
+            print(f'Parsed {len(tweets)} tweets, Elapsed time: {end_time - start_time:0.4f} seconds, average per tweet: {avg_time_per_tweet:0.8f} seconds')
 
+            start_time = time.perf_counter()
+            for parsed_document in documents_list:
+                indexer.add_new_doc(parsed_document)
+            end_time = time.perf_counter()
+            print(f'Indexing {len(documents_list)} tweets, Elapsed time: {end_time - start_time:0.4f} seconds')
+    print('Finished parsing and indexing. Starting to export files')
     utils.save_obj(indexer.inverted_idx, "inverted_idx")
     utils.save_obj(indexer.postingDict, "posting")
 
