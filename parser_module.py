@@ -1,19 +1,14 @@
 from nltk.corpus import stopwords
 from document import Document
 import re
-import spacy
 from stemmer import Stemmer
-import sys
 import time
-
-nlp = spacy.load("en_core_web_sm")
-
 
 class Parse:
 
-    def __init__(self, with_stemmer=False, include_urls=False, include_quote=False, debug=False, timer=False):
+    def __init__(self, with_stem=False, include_urls=False, include_quote=False, debug=False, timer=False):
         self.stemmer = Stemmer()
-        self.with_stemmer = with_stemmer
+        self.with_stemmer = with_stem
         self.include_urls = include_urls
         self.include_quote = include_quote
         self.stop_words = stopwords.words('english')
@@ -39,21 +34,22 @@ class Parse:
 
         text = text.replace('\n', ' ')  # remove new lines
         text = re.sub(' +', ' ', text)  # Remove double spaces
+        text = re.sub('-', " ", text)
+        text = re.sub('’', "'", text)
         return text
 
     def _extract_entities(self, text):
-        terms = []
         entities_terms = []
         subterm = ''
 
-        for subtext in text.split(','):
-            sub_terms = subtext.split(' ')
+        for subtext in text.split(', '):
+            sub_terms = subtext.replace('-', ' ').split(' ')
             for term in sub_terms:
-                if not term.replace("'", '').replace('-', '').isalnum(): #Not a word
+                if not term.replace("'", '').isalnum(): #Not a word
                     if len(subterm.split(' ')) >= 2:
                         entities_terms.append(subterm)
                     subterm = ''
-                elif term[0].upper() == term[0]:
+                elif term[0].isupper() and term[0].upper() == term[0]:
                     if subterm == '':
                         subterm = term.replace('-', ' ')
                     else:
@@ -62,10 +58,10 @@ class Parse:
                     if len(subterm.split(' ')) >= 2:
                         entities_terms.append(subterm)
                     subterm = ''
-                terms.append(term)
+            entities_terms.append(subterm)
 
         entities_terms = [term for term in entities_terms if term != '']
-        return entities_terms, terms
+        return entities_terms
 
     def _number_transform(self, term):
         opt_term = term.replace('%', '', 1).replace('$', '', 1).replace('K', '', 1) \
@@ -130,15 +126,23 @@ class Parse:
         return parts
 
     def remove_comma(self, w):
-        w = re.sub('[,]*$', '', w)
-        w = re.sub('[.]*$', '', w)
-        w = re.sub('^[,]*', '', w)
-        w = re.sub('^[.]*', '', w)
-        w = re.sub('[:]*$', '', w)
-        w = re.sub('[-]+', ' ', w)
-        w = re.sub('[’]+', "'", w)
-        w = re.sub('[?]*$', '', w)
-        w = re.sub('[!]*$', '', w)
+        w_prev = ''
+        while w_prev != w:
+            w_prev = w
+            w = re.sub('[-]+', ' ', w)
+            w = re.sub('^[ ]*', '', w)
+            w = re.sub('[ ]*$', '', w)
+            w = re.sub("^[']*", '', w)
+            w = re.sub("[']*$", '', w)
+            w = re.sub('[,]*$', '', w)
+            w = re.sub('[.]*$', '', w)
+            w = re.sub('^[,]*', '', w)
+            w = re.sub('^[.]*', '', w)
+            w = re.sub('[:]*$', '', w)
+            w = re.sub('[’]+', "'", w)
+            w = re.sub('[?]*$', '', w)
+            w = re.sub('[!]*$', '', w)
+            w = re.sub('[..]+[...]+', '', w)
         return w
 
     def _splitHashtags(self, term_):
@@ -192,6 +196,7 @@ class Parse:
 
     def _remove_slashes(self, tokens):
         result_tokens = []
+
         for token in tokens:
             if len(token.split('/')) == 1:
                 result_tokens.append(token)
@@ -224,20 +229,21 @@ class Parse:
         :param text:
         :return:
         """
-        self.timer = True
+        self.timer = False
         self.times = []
+        final_tokens = []
 
         if self.debug:
             print('Text:', text)
 
         text = self._apply(self._pre_parse, text)
-        entities, temp_text_tokens = self._apply(self._extract_entities, text)
+        entities = self._apply(self._extract_entities, text)
 
-        removed_urls_tokens = [w for w in temp_text_tokens if not w.startswith('https')]
+        tokens = text.split(' ')
+        removed_urls_tokens = [w for w in tokens if not w.startswith('https')]
+        tokens = self._apply(self._remove_slashes, removed_urls_tokens)
 
-        text_tokens = self._apply(self._remove_slashes, removed_urls_tokens)
-
-        remove_comma_terms = [self.remove_comma(term) for term in text_tokens if self.remove_comma(term) != '']
+        remove_comma_terms = [self.remove_comma(term) for term in tokens if self.remove_comma(term) != '']
         entities_terms = [self.remove_comma(term) for term in entities if self.remove_comma(term) != '']
         fix_numbers_terms = [self._number_transform(w) for w in remove_comma_terms]
 
@@ -245,14 +251,14 @@ class Parse:
 
         parse_number_comma_tokens = [w for w in parse_number_comma_tokens if w.lower() not in self.stop_words]
 
-        tokens_parsed, rest_tokens = self._apply(self._hashtags_tag_parse, parse_number_comma_tokens)
+        hashtags_tag_parsed, rest_tokens = self._apply(self._hashtags_tag_parse, parse_number_comma_tokens)
 
         capital_tokens = [token.upper() for token in rest_tokens if token.lower() != token]
-        rest_tokens = [token for token in rest_tokens if token.lower() == token]
+        rest_tokens = [token for token in rest_tokens if token.lower() == token] + capital_tokens
 
         if self.with_stemmer:
             rest_tokens = [self.stemmer.stem_term(token) for token in rest_tokens]
-        total_tokens = rest_tokens + entities_terms + tokens_parsed + capital_tokens
+        total_tokens = rest_tokens + entities_terms + hashtags_tag_parsed
 
         if self.debug:
             print('Total tokens:', total_tokens)
@@ -280,8 +286,10 @@ class Parse:
         quote_url = doc_as_list[9]
         term_dict = {}
 
-        #print(full_text)
+        # if '888' in full_text and '499' in full_text:
+        #     print(full_text, '\n', '', '\n####################################################')
 
+        #full_text = 'Donald Trump'
         try:
             tokenized_text = self.parse_sentence(full_text)
         except:
@@ -289,6 +297,9 @@ class Parse:
             tokenized_text = []
         # print(tokenized_text)
         # print('---------------------------------------------------------')
+
+        # if '888' in full_text and '499' in full_text:
+        #     print(full_text, '\n', tokenized_text, '\n####################################################')
 
         if self.include_urls:
             tokenized_text += self._parse_urls(url)
