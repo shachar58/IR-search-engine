@@ -2,12 +2,11 @@ from nltk.corpus import stopwords
 from document import Document
 import re
 import time
-from stemmer import Stemmer
+from stemmer import Lemmatizer
 class Parse:
 
-    def __init__(self, with_stem=False):
-        self.stemmer = Stemmer()
-        self.with_stemmer = with_stem
+    def __init__(self):
+        self.lemmatizer = Lemmatizer()
         self.stop_words = stopwords.words('english')
         self.stop_words += ["i'm", "it's", 'they', "i've", 'you', 'u', 'we', 'rt', 'im', 'use', 'sure', 'https', 'www',
                             'p', 'igshid', 'wear', 't.co', 'covid', 'covid-19', 'people', 'new', 'amp',
@@ -58,7 +57,7 @@ class Parse:
                     subterm = ''
             entities_terms.append(subterm)
 
-        entities_terms = [term for term in entities_terms if term != '']
+        entities_terms = [term for term in entities_terms if term != '' and len(term) - len(term.replace(' ', '')) < 4]
         return entities_terms
 
     def _number_transform(self, term):
@@ -227,8 +226,7 @@ class Parse:
         capital_tokens = [token.upper() for token in rest_tokens if token.lower() != token]
         rest_tokens = [token for token in rest_tokens if token.lower() == token] + capital_tokens
 
-        if self.with_stemmer:
-            rest_tokens = [self.stemmer.stem_term(token) for token in rest_tokens]
+        rest_tokens = [self.lemmatizer.lemmatize_term(token) for token in rest_tokens]
         total_tokens = rest_tokens + entities_terms + hashtags_tag_parsed + covid
         total_tokens = [token for token in total_tokens if token != '' or len(token) == 1]
 
@@ -242,8 +240,7 @@ class Parse:
             urls_tokens = [item.split('-') for sublist in urls_tokens for item in sublist]
             urls_tokens = [item for sublist in urls_tokens for item in sublist]
             urls_tokens = [w for w in urls_tokens if w.lower() not in self.stop_words]
-            if self.with_stemmer:
-                urls_tokens = [self.stemmer.stem_term(token) for token in urls_tokens]
+            urls_tokens = [self.lemmatizer.lemmatize_term(token) for token in urls_tokens]
         except:
             urls_tokens = []
         return urls_tokens
@@ -265,10 +262,13 @@ class Parse:
 
         try:
             tokenized_text = self.parse_sentence(full_text) + self._parse_urls(url)
-            discard_terms = [token for token in tokenized_text if token.isdigit() or (token.isalnum() and not token.isalpha())]
+            discard_terms = [token for token in tokenized_text if token.isdigit() or
+                             not token.replace(' ', '').replace("'", '').isalnum() or
+                             (token.isalnum() and not token.isalpha())]
             tokenized_text = [token for token in tokenized_text if token not in discard_terms]
         except:
             tokenized_text = []
+
 
         doc_length = len(tokenized_text)  # after text operations.
 
@@ -282,3 +282,30 @@ class Parse:
                             quote_text=quote_text, quote_url=quote_url, term_doc_dictionary=term_dict,
                             doc_length=doc_length)
         return document
+
+
+    def parse_doc_lsi(self, doc_as_list):
+        """
+        This function takes a tweet document as list and break it into different fields
+        :param doc_as_list: list re-preseting the tweet.
+        :return: Document object with corresponding fields.
+        """
+
+        tweet_id = doc_as_list[0]
+        tweet_date = doc_as_list[1]
+        full_text = doc_as_list[2]
+        url = doc_as_list[3]
+        quote_text = doc_as_list[8]
+        quote_url = doc_as_list[9]
+        term_dict = {}
+
+        try:
+            tokenized_text = self.parse_sentence(full_text) + self._parse_urls(url)
+            discard_terms = [token for token in tokenized_text if token.isdigit() or
+                             not token.replace(' ', '').replace("'", '').isalnum() or
+                             (token.isalnum() and not token.isalpha())]
+            tokenized_text = [token for token in tokenized_text if token not in discard_terms]
+
+        except:
+            tokenized_text = []
+        return [tweet_id, tokenized_text]

@@ -33,11 +33,15 @@ class SearchEngine:
         Output:
             No output, just modifies the internal _indexer object.
         """
+        fname = r'C:\Users\Koren Levenbrown\Desktop\koren\university\Search_Engine\PartC\Data\lsiData' + fn[fn.rfind(os.sep):fn.rfind('.')]
+
         start = perf_counter()
         documents_list = self.reader.read_file(fn)
-        documents_list = multiprocessing.Pool().map(self._parser.parse_doc, documents_list)
+        documents_list = multiprocessing.Pool().map(self._parser.parse_doc_lsi, documents_list)
         self.number_of_docs += len(documents_list)
-        [self._indexer.add_new_doc(parsed_document) for parsed_document in documents_list]
+
+        utils.save_obj(documents_list, fname)
+        #[self._indexer.add_new_doc(parsed_document) for parsed_document in documents_list]
         end = perf_counter()
         sys.stdout.write(
             '\rParsed: ' + str(self.number_of_docs) + ', Avg: ' + str((end - start) / len(documents_list)))
@@ -50,11 +54,11 @@ class SearchEngine:
             files = [os.path.join(dirr, file) for file in os.listdir(os.path.join(data_dir, dirr)) if file.endswith('.parquet')]
             for file in files:
                 self.build_index_from_parquet(file)
-        start = perf_counter()
-        before, after, after_ = self._indexer.post_indexing(27000, 7.5)
-        end = perf_counter()
-        print('\nPost indexing:', str(end - start), ', Terms before:', before, ', Terms after:', after, " ", after_)
-        self._indexer.save_index('new_indexer.pkl')
+        # start = perf_counter()
+        # before, after, after_ = self._indexer.post_indexing(27000, 7.5)
+        # end = perf_counter()
+        # print('\nPost indexing:', str(end - start), ', Terms before:', before, ', Terms after:', after, " ", after_)
+        # self._indexer.save_index('lemmatized_indexer.pkl')
 
 
     # DO NOT MODIFY THIS SIGNATURE

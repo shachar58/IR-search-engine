@@ -1,5 +1,6 @@
 import utils
 import os
+import spacy
 
 class Indexer:
 
@@ -10,7 +11,7 @@ class Indexer:
 
         self.indexers = [{} for i in range(28)]
         self.postings = [{} for i in range(28)]
-
+        self.nlp = spacy.load("en_core_web_sm")
 
     def add_new_doc(self, document):
 
@@ -61,9 +62,27 @@ class Indexer:
                             discard_terms.add(term)
                         except:
                             pass
-
-            cur_indexer = {key: cur_indexer[key] for key in terms if key not in discard_terms and
-                           max_n_docs_for_discard > cur_indexer[key] > min_n_docs_for_discard}
+                cur_indexer = {key: cur_indexer[key] for key in terms if key not in discard_terms and
+                               max_n_docs_for_discard > cur_indexer[key] > min_n_docs_for_discard}
+            else:
+                cur_indexer = {key: cur_indexer[key] for key in terms if max_n_docs_for_discard > cur_indexer[key] > 5}
+                terms = list(cur_indexer)
+                for term in terms:
+                    doc = self.nlp(term)
+                    entities = [x.text for x in doc.ents if x.label_.lower() in ['person', 'norp', 'fac', 'org', 'gpe', 'loc']]
+                    for entity in entities:
+                        if term == entity:
+                            continue
+                        try:
+                            cur_indexer[entity] += cur_indexer[term]
+                            cur_posting[entity].extend(cur_posting[term])
+                        except:
+                            cur_indexer[entity] = cur_indexer[term]
+                            cur_posting[entity] = cur_posting[term]
+                        discard_terms.add(term)
+                    if len(entities) == 0:
+                        discard_terms.add(term)
+                cur_indexer = {key: cur_indexer[key] for key in terms if key not in discard_terms}
             terms = list(cur_indexer)
             cur_posting = {key: cur_posting[key] for key in terms}
 
